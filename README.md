@@ -42,3 +42,7 @@ cargo install --path .
 - Matching is case-insensitive
 - When a matching directory is found, its contents are not scanned individually
 - Deleting from `/Library` may require `sudo`
+
+## License
+
+MIT. SEE: `LICENSE`
