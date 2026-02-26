@@ -1,142 +1,147 @@
 use clap::Parser;
-use std::env;
-use std::fs;
-use std::io::stdin;
-use std::path::{Path, PathBuf};
+use dialoguer::{Select, theme::ColorfulTheme};
+use indicatif::{ProgressBar, ProgressStyle};
+use std::path::PathBuf;
+use std::time::Duration;
+mod clean_files;
+use clean_files::clean_files;
+mod get_results;
+use get_results::get_results;
 use walkdir::WalkDir;
+mod search_library;
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Parser)]
 #[command(
     name = "cleanapp",
     about = "Clean application files and directories on macOS",
-    before_help = "Use sudo to run this tool if you want to clean files in /Library. For example: sudo cleanapp --list MyApp"
+    before_help = "Use sudo to run this tool if you want to clean files in /Library. For example: sudo cleanapp MyApp"
 )]
 struct Args {
     #[arg(help = "Name of the app to clean or list files and directories for")]
     app_name: String,
     #[arg(long)]
-    #[arg(help = "Whether to list files and directories instead of cleaning them")]
-    list: bool,
-    #[arg(long)]
     #[arg(help = "list of file or directory names to exclude from cleaning")]
     exclude: Vec<String>,
 }
 
-fn main() {
+fn main() -> Result<()> {
     let args = Args::parse();
 
-    let Some(home_env) = env::var_os("HOME") else {
-        return eprintln!("Error: HOME environment variable not set");
-    };
-    let home = PathBuf::from(home_env);
-
-    let library = home.join("Library");
-    let sys_library = "/Library";
-
-    let mut results = Vec::new();
-    let app_name_lower = args.app_name.to_ascii_lowercase();
-    let exclude_list = args
-        .exclude
-        .into_iter()
-        .map(|s| s.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-
-    results.extend(search_library(&library, &app_name_lower, &exclude_list));
-    results.extend(search_library(
-        Path::new(sys_library),
-        &app_name_lower,
-        &exclude_list,
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_message(format!(
+        "Searching for files and directories related to '{}'",
+        args.app_name
     ));
+    spinner.set_style(
+        ProgressStyle::with_template("{spinner} {msg}")
+            .unwrap()
+            .tick_strings(&["-", "\\", "|", "/"]),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(100));
+
+    let results = get_results(&args.app_name, &args.exclude)?;
+    spinner.finish_and_clear();
+
     if results.is_empty() {
         println!("No files or directories found for app: {}", args.app_name);
-        return;
+        return Ok(());
     }
-
-    if args.list {
-        println!("Listing files for app: {}", args.app_name);
-        for path in &results {
-            if path.is_file() {
-                println!("\x1b[32m[FILE]\x1b[0m {}", path.display()); // vert
-            } else if path.is_dir() {
-                println!("\x1b[34m[DIR]\x1b[0m  {}", path.display()); // bleu
-            }
-        }
-    }
-
-    println!("\x1b[34m[!!!] Note: deleting from /Library may require sudo\x1b[0m");
-    println!(
-        "\x1b[33m[!!!] Are you sure you want to clean \x1b[1m{}\x1b[0m \x1b[33mfiles and directories? (y/n)\x1b[0m",
-        results.len()
-    );
-
-    let mut input = String::new();
-    stdin().read_line(&mut input).expect("Failed to read input");
-    let input = input.trim().to_ascii_lowercase();
-    if input == "yes" || input == "y" {
-        clean_files(results);
-    } else {
-        println!("Aborting cleaning process.");
-    }
-}
-
-fn search_library(root: &Path, app_name: &str, exclude_list: &[String]) -> Vec<PathBuf> {
-    let mut results = Vec::new();
-    let mut it = WalkDir::new(root).into_iter();
+    let theme = ColorfulTheme::default();
+    let size = total_size(&results);
+    let formated_size = format_size(size);
 
     loop {
-        let entry = match it.next() {
-            None => break,
-            Some(Ok(e)) => e,
-            Some(Err(_)) => continue,
-        };
-        let path_lower = entry
-            .path()
-            .as_os_str()
-            .to_string_lossy()
-            .to_ascii_lowercase();
+        let select = Select::with_theme(&theme)
+            .with_prompt(format!(
+                "Found {} items for app '{}'. Total size: {}.\nWhat do you want to do?",
+                results.len(),
+                args.app_name,
+                formated_size
+            ))
+            .item("List all found files and directories")
+            .item("Clean all found files and directories")
+            .item("Exit")
+            .default(0);
 
-        if let Some(file_name) = entry.file_name().to_ascii_lowercase().to_str() {
-            if file_name.contains(app_name)
-                && !exclude_list
-                    .iter()
-                    .any(|ex| path_lower.contains(ex.as_str()))
-            {
-                if entry.file_type().is_dir() {
-                    results.push(entry.path().to_path_buf());
-                    it.skip_current_dir();
-                    continue;
-                } else if entry.file_type().is_file() {
-                    results.push(entry.path().to_path_buf());
+        if let Ok(choice) = select.interact() {
+            match choice {
+                0 => {
+                    println!("Found items:");
+                    for path in &results {
+                        if path.is_file() {
+                            println!("\x1b[32m[FILE]\x1b[0m {}", path.display()); // vert
+                        } else if path.is_dir() {
+                            println!("\x1b[34m[DIR]\x1b[0m  {}", path.display()); // bleu
+                        }
+                    }
                 }
+                1 => {
+                    let confirm = Select::with_theme(&theme)
+                        .with_prompt(
+                            "Are you sure you want to clean all found files and directories?",
+                        )
+                        .item("Yes, clean them")
+                        .item("No, go back")
+                        .default(0);
+
+                    if let Ok(confirm_choice) = confirm.interact() {
+                        if confirm_choice == 0 {
+                            clean_files(results);
+                            break;
+                        } else {
+                            println!("Cleaning cancelled. Returning to main menu.");
+                        }
+                    } else {
+                        eprintln!("Error reading user input. Returning to main menu.");
+                    }
+                }
+                2 => {
+                    println!("Exiting...");
+                    break;
+                }
+                _ => unreachable!(),
             }
+        } else {
+            eprintln!("Error reading user input. Exiting...");
+            break;
         }
     }
-    results
+    Ok(())
 }
 
-fn clean_files(paths: Vec<PathBuf>) {
+fn total_size(paths: &[PathBuf]) -> u64 {
+    let mut total = 0;
     for path in paths {
-        let dir_or_file = if path.is_file() { "file" } else { "directory" };
-
-        let result = if path.is_file() {
-            fs::remove_file(&path)
-        } else if path.is_dir() {
-            fs::remove_dir_all(&path)
+        if path.is_file() {
+            if let Ok(metadata) = path.metadata() {
+                total += metadata.len();
+            }
         } else {
-            continue;
-        };
-
-        match result {
-            Ok(_) => println!(
-                "\x1b[32m[OK]\x1b[0m Removed {}: {}",
-                dir_or_file,
-                path.display()
-            ),
-            Err(e) => eprintln!(
-                "\x1b[31m[ERROR]\x1b[0m Failed to remove {}: {}",
-                path.display(),
-                e
-            ),
+            total += WalkDir::new(path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+                .filter_map(|e| e.metadata().ok().map(|m| m.len()))
+                .sum::<u64>();
         }
+    }
+    total
+}
+
+fn format_size(size: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if size >= GB {
+        format!("{:.2} GB", size as f64 / GB as f64)
+    } else if size >= MB {
+        format!("{:.2} MB", size as f64 / MB as f64)
+    } else if size >= KB {
+        format!("{:.2} KB", size as f64 / KB as f64)
+    } else {
+        format!("{} bytes", size)
     }
 }
