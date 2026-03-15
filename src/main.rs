@@ -1,6 +1,7 @@
 use clap::Parser;
 use dialoguer::{Select, theme::ColorfulTheme};
 use indicatif::{ProgressBar, ProgressStyle};
+use search::SearchOptions;
 use std::path::PathBuf;
 use std::time::Duration;
 mod clean_files;
@@ -8,7 +9,7 @@ use clean_files::clean_files;
 mod get_results;
 use get_results::get_results;
 use walkdir::WalkDir;
-mod search_library;
+mod search;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -24,6 +25,17 @@ struct Args {
     #[arg(long)]
     #[arg(help = "list of file or directory names to exclude from cleaning")]
     exclude: Vec<String>,
+    #[arg(long)]
+    #[arg(
+        help = "Make a deep search for files and directories related to the app. This may take more time but will find more items."
+    )]
+    deep: bool,
+    #[arg(long)]
+    #[arg(help = "Case sensitive search. By default, the search is case insensitive.")]
+    case_sensitive: bool,
+    #[arg(long)]
+    #[arg(help = "Exact match search. By default, the search is a substring match.")]
+    exact: bool,
 }
 
 fn main() -> Result<()> {
@@ -41,7 +53,15 @@ fn main() -> Result<()> {
     );
     spinner.enable_steady_tick(Duration::from_millis(100));
 
-    let results = get_results(&args.app_name, &args.exclude)?;
+    let options = SearchOptions {
+        app_name: &args.app_name,
+        exclude_list: &args.exclude,
+        deep: args.deep,
+        case_sensitive: args.case_sensitive,
+        exact: args.exact,
+    };
+
+    let results = get_results(&options, &spinner)?;
     spinner.finish_and_clear();
 
     if results.is_empty() {
