@@ -1,4 +1,5 @@
 use clap::Parser;
+use console::style;
 use dialoguer::{Select, theme::ColorfulTheme};
 use indicatif::{ProgressBar, ProgressStyle};
 use search::SearchOptions;
@@ -16,9 +17,10 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 #[derive(Parser)]
 #[command(
     name = "cleanapp",
-    about = "Clean application files and directories on macOS",
-    before_help = "Use sudo to run this tool if you want to clean files in /Library. For example: sudo cleanapp MyApp"
+    about = "Find and clean leftover application files and directories",
+    before_help = "Run with elevated privileges (sudo on macOS/Linux, Administrator on Windows) to clean system-level files."
 )]
+
 struct Args {
     #[arg(help = "Name of the app to clean or list files and directories for")]
     app_name: String,
@@ -36,10 +38,25 @@ struct Args {
     #[arg(long)]
     #[arg(help = "Exact match search. By default, the search is a substring match.")]
     exact: bool,
+    #[arg(long)]
+    #[arg(help = "Search only in the current directory and its subdirectories")]
+    here: bool,
+    #[arg(long)]
+    #[arg(help = "Maximum depth of subdirectories to search")]
+    max_depth: Option<usize>,
+    #[arg(long)]
+    #[arg(help = "Add a custom path to search in (repeatable)")]
+    add: Vec<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    if !is_elevated() {
+        eprintln!("{}",
+            style("[WARNING] You are running this tool without elevated privileges. Some files and directories may not be found or cleaned.").yellow()
+        );
+    }
 
     let spinner = ProgressBar::new_spinner();
     spinner.set_message(format!(
@@ -59,9 +76,10 @@ fn main() -> Result<()> {
         deep: args.deep,
         case_sensitive: args.case_sensitive,
         exact: args.exact,
+        max_depth: args.max_depth,
     };
 
-    let results = get_results(&options, &spinner)?;
+    let results = get_results(&options, &spinner, args.here, &args.add)?;
     spinner.finish_and_clear();
 
     if results.is_empty() {
@@ -91,9 +109,9 @@ fn main() -> Result<()> {
                     println!("Found items:");
                     for path in &results {
                         if path.is_file() {
-                            println!("\x1b[32m[FILE]\x1b[0m {}", path.display()); // vert
+                            println!("{} {}", style("[FILE]").green(), path.display()); // vert
                         } else if path.is_dir() {
-                            println!("\x1b[34m[DIR]\x1b[0m  {}", path.display()); // bleu
+                            println!("{} {}", style("[DIR]").blue(), path.display()); // bleu
                         }
                     }
                 }
@@ -163,5 +181,46 @@ fn format_size(size: u64) -> String {
         format!("{:.2} KB", size as f64 / KB as f64)
     } else {
         format!("{} bytes", size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_bytes() {
+        assert_eq!(format_size(0), "0 bytes");
+        assert_eq!(format_size(512), "512 bytes");
+    }
+
+    #[test]
+    fn format_kilobytes() {
+        assert_eq!(format_size(1024), "1.00 KB");
+        assert_eq!(format_size(1536), "1.50 KB");
+    }
+
+    #[test]
+    fn format_megabytes() {
+        assert_eq!(format_size(1024 * 1024), "1.00 MB");
+        assert_eq!(format_size(5 * 1024 * 1024), "5.00 MB");
+    }
+
+    #[test]
+    fn format_gigabytes() {
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.00 GB");
+        assert_eq!(format_size(3 * 1024 * 1024 * 1024), "3.00 GB");
+    }
+}
+
+fn is_elevated() -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::geteuid() == 0 }
+    }
+
+    #[cfg(windows)]
+    {
+        std::fs::read_dir("C:\\Windows\\System32").is_ok()
     }
 }

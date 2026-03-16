@@ -8,6 +8,7 @@ pub struct SearchOptions<'a> {
     pub deep: bool,
     pub case_sensitive: bool,
     pub exact: bool,
+    pub max_depth: Option<usize>,
 }
 
 pub fn search(
@@ -16,7 +17,12 @@ pub fn search(
     progress_bar: &indicatif::ProgressBar,
 ) -> Vec<PathBuf> {
     let mut results = Vec::new();
-    let mut it = WalkDir::new(root).into_iter();
+    let walker = if let Some(depth) = opts.max_depth {
+        WalkDir::new(root).max_depth(depth)
+    } else {
+        WalkDir::new(root)
+    };
+    let mut it = walker.into_iter();
     let mut last_update = Instant::now();
 
     let app_name = if opts.case_sensitive {
@@ -78,4 +84,174 @@ pub fn search(
         }
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indicatif::ProgressBar;
+    use std::fs;
+
+    fn hidden_progress_bar() -> ProgressBar {
+        let pb = ProgressBar::new_spinner();
+        pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+        pb
+    }
+
+    fn default_opts(app_name: &str) -> SearchOptions<'_> {
+        SearchOptions {
+            app_name,
+            exclude_list: &[],
+            deep: false,
+            case_sensitive: false,
+            exact: false,
+            max_depth: None,
+        }
+    }
+
+    #[test]
+    fn finds_matching_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("Spotify.plist"), "data").unwrap();
+        fs::write(tmp.path().join("unrelated.txt"), "data").unwrap();
+
+        let pb = hidden_progress_bar();
+        let results = search(tmp.path(), &default_opts("spotify"), &pb);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("Spotify.plist"));
+    }
+
+    #[test]
+    fn finds_matching_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("com.spotify.client")).unwrap();
+        fs::write(
+            tmp.path().join("com.spotify.client").join("inner.txt"),
+            "data",
+        )
+        .unwrap();
+
+        let pb = hidden_progress_bar();
+        let results = search(tmp.path(), &default_opts("spotify"), &pb);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("com.spotify.client"));
+    }
+
+    #[test]
+    fn case_insensitive_by_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("SPOTIFY.plist"), "data").unwrap();
+        fs::write(tmp.path().join("spotify.cache"), "data").unwrap();
+
+        let pb = hidden_progress_bar();
+        let results = search(tmp.path(), &default_opts("Spotify"), &pb);
+
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn case_sensitive_search() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("Spotify.plist"), "data").unwrap();
+        fs::write(tmp.path().join("spotify.cache"), "data").unwrap();
+
+        let pb = hidden_progress_bar();
+        let opts = SearchOptions {
+            case_sensitive: true,
+            ..default_opts("Spotify")
+        };
+        let results = search(tmp.path(), &opts, &pb);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("Spotify.plist"));
+    }
+
+    #[test]
+    fn exact_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("chrome.plist"), "data").unwrap();
+        fs::write(tmp.path().join("chromium.plist"), "data").unwrap();
+        fs::write(tmp.path().join("com.google.chrome.plist"), "data").unwrap();
+
+        let pb = hidden_progress_bar();
+        let opts = SearchOptions {
+            exact: true,
+            ..default_opts("chrome")
+        };
+        let results = search(tmp.path(), &opts, &pb);
+
+        assert_eq!(results.len(), 2);
+        let names: Vec<_> = results.iter().map(|p| p.file_name().unwrap()).collect();
+        assert!(names.contains(&std::ffi::OsStr::new("chrome.plist")));
+        assert!(names.contains(&std::ffi::OsStr::new("com.google.chrome.plist")));
+    }
+
+    #[test]
+    fn excludes_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let keep = tmp.path().join("keepdir");
+        fs::create_dir(&keep).unwrap();
+        fs::write(keep.join("spotify.plist"), "data").unwrap();
+        fs::write(tmp.path().join("spotify.cache"), "data").unwrap();
+
+        let pb = hidden_progress_bar();
+        let exclude = vec!["keepdir".to_string()];
+        let opts = SearchOptions {
+            exclude_list: &exclude,
+            ..default_opts("spotify")
+        };
+        let results = search(tmp.path(), &opts, &pb);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("spotify.cache"));
+    }
+
+    #[test]
+    fn max_depth_limits_search() {
+        let tmp = tempfile::tempdir().unwrap();
+        // depth 1: direct child
+        fs::write(tmp.path().join("spotify.txt"), "data").unwrap();
+        // depth 2: nested
+        let nested = tmp.path().join("sub");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("spotify.log"), "data").unwrap();
+
+        let pb = hidden_progress_bar();
+        let opts = SearchOptions {
+            max_depth: Some(1),
+            ..default_opts("spotify")
+        };
+        let results = search(tmp.path(), &opts, &pb);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("spotify.txt"));
+    }
+
+    #[test]
+    fn no_results_when_nothing_matches() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("unrelated.txt"), "data").unwrap();
+
+        let pb = hidden_progress_bar();
+        let results = search(tmp.path(), &default_opts("spotify"), &pb);
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn skips_dir_contents_after_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("spotify_data");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("spotify_inner.txt"), "data").unwrap();
+
+        let pb = hidden_progress_bar();
+        let results = search(tmp.path(), &default_opts("spotify"), &pb);
+
+        // Should only return the directory, not the inner file
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("spotify_data"));
+    }
 }

@@ -1,8 +1,56 @@
+use console::style;
 use std::fs;
 use std::path::PathBuf;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn removes_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("test.txt");
+        fs::write(&file, "data").unwrap();
+        assert!(file.exists());
+
+        clean_files(vec![file.clone()]);
+
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn removes_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("testdir");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("inner.txt"), "data").unwrap();
+        assert!(dir.exists());
+
+        clean_files(vec![dir.clone()]);
+
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn handles_nonexistent_path() {
+        let path = PathBuf::from("/tmp/cleanapp_nonexistent_path_test");
+        // Should not panic
+        clean_files(vec![path]);
+    }
+}
+
 pub fn clean_files(paths: Vec<PathBuf>) {
     for path in paths {
+        if !path.exists() {
+            eprintln!(
+                "{} Path does not exist: {}",
+                style("[ERROR]").red(),
+                path.display()
+            );
+            continue;
+        }
+
         let dir_or_file = if path.is_file() { "file" } else { "directory" };
 
         let result = if path.is_file() {
@@ -15,12 +63,14 @@ pub fn clean_files(paths: Vec<PathBuf>) {
 
         match result {
             Ok(_) => println!(
-                "\x1b[32m[OK]\x1b[0m Removed {}: {}",
+                "{} Removed {}: {}",
+                style("[OK]").green(),
                 dir_or_file,
                 path.display()
             ),
             Err(e) => eprintln!(
-                "\x1b[31m[ERROR]\x1b[0m Failed to remove {}: {}",
+                "{} Failed to remove {}: {}",
+                style("[ERROR]").red(),
                 path.display(),
                 e
             ),
