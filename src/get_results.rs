@@ -65,10 +65,10 @@ fn get_roots(deep: bool, home_dir: PathBuf) -> Result<Vec<PathBuf>> {
         if let Some(dir) = config_dir() {
             roots.push(dir);
         }
-        if let Some(dir) = data_dir() {
-            if !roots.contains(&dir) {
-                roots.push(dir);
-            }
+        if let Some(dir) = data_dir()
+            && !roots.contains(&dir)
+        {
+            roots.push(dir);
         }
 
         Ok(roots)

@@ -20,7 +20,6 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
     about = "Find and clean leftover application files and directories",
     before_help = "Run with elevated privileges (sudo on macOS/Linux, Administrator on Windows) to clean system-level files."
 )]
-
 struct Args {
     #[arg(help = "Name of the app to clean or list files and directories for")]
     app_name: String,
