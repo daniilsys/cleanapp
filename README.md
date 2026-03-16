@@ -3,14 +3,14 @@
 [![CI](https://github.com/daniilsys/cleanapp/actions/workflows/ci.yml/badge.svg)](https://github.com/daniilsys/cleanapp/actions/workflows/ci.yml)
 [![Release](https://github.com/daniilsys/cleanapp/actions/workflows/release.yml/badge.svg)](https://github.com/daniilsys/cleanapp/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](Cargo.toml)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](Cargo.toml)
 
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)](https://www.linux.org/)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat&logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
-A cross-platform CLI tool to find and remove leftover files and directories from uninstalled applications.
+A cross-platform CLI tool to find and remove leftover files and directories from uninstalled applications. Supports targeted cleanup by app name and automatic orphan detection on macOS and Windows.
 
 ## Install
 
@@ -55,11 +55,13 @@ cargo install --path .
 
 ## Usage
 
-```bash
-cleanapp <APP_NAME> [OPTIONS]
-```
+cleanapp has two subcommands: `clean` for targeted removal by app name, and `scan` for automatic orphan detection.
 
-## Options
+### `cleanapp clean` — Remove files by app name
+
+```bash
+cleanapp clean <APP_NAME> [OPTIONS]
+```
 
 | Flag               | Description                                                        |
 | ------------------ | ------------------------------------------------------------------ |
@@ -71,58 +73,84 @@ cleanapp <APP_NAME> [OPTIONS]
 | `--max-depth <N>`  | Maximum depth of subdirectories to search                          |
 | `--add <PATH>`     | Add a custom path to search in (repeatable)                        |
 
+### `cleanapp scan` — Detect orphan files (macOS & Windows)
+
+```bash
+cleanapp scan [OPTIONS]
+```
+
+Scans installed applications and checks support directories for entries that don't match any installed app. Each orphan candidate receives a confidence score (0-100%) based on match quality, file age, size, and name format.
+
+- **macOS**: discovers apps via `/Applications` bundle IDs, scans `~/Library` support directories
+- **Windows**: discovers apps via the registry and Scoop, scans `%APPDATA%` and `%LOCALAPPDATA%`
+
+| Flag                   | Description                                                           |
+| ---------------------- | --------------------------------------------------------------------- |
+| `--confidence <VALUE>` | Pre-select orphans with confidence >= this threshold (default: `0.5`) |
+| `--atleast <VALUE>`    | Only show orphans with confidence >= this value (hides the rest)      |
+
 ## Examples
 
 ```bash
 # Delete all Spotify leftover files
-cleanapp Spotify
+cleanapp clean Spotify
 
 # Preview Chrome files, excluding Arc-related paths
-cleanapp Chrome --exclude Arc
+cleanapp clean Chrome --exclude Arc
 
 # Clean system-level files (requires elevated privileges)
 # macOS/Linux:
-sudo cleanapp Zoom
+sudo cleanapp clean Zoom
 # Windows (run terminal as Administrator):
-cleanapp Zoom
+cleanapp clean Zoom
 
 # Deep search for all Firefox remnants
-cleanapp Firefox --deep
+cleanapp clean Firefox --deep
 
 # Find "chrome" but not "chromium"
-cleanapp chrome --exact
+cleanapp clean chrome --exact
 
 # Case-sensitive deep search
-cleanapp WebStorm --case-sensitive --deep
+cleanapp clean WebStorm --case-sensitive --deep
 
 # Search only in the current directory
-cleanapp node_modules --here
+cleanapp clean node_modules --here
 
 # Limit search depth to 3 levels
-cleanapp Spotify --max-depth 3
+cleanapp clean Spotify --max-depth 3
 
 # Add custom paths to search in
-cleanapp Zoom --add /tmp --add /var/log
+cleanapp clean Zoom --add /tmp --add /var/log
 
 # Combine options
-cleanapp Chrome --here --add ~/Downloads --max-depth 2
+cleanapp clean Chrome --here --add ~/Downloads --max-depth 2
+
+# Scan for orphan files (macOS/Windows)
+cleanapp scan
+
+# Only pre-select high-confidence orphans
+cleanapp scan --confidence 0.8
+
+# Hide low-confidence results entirely
+cleanapp scan --atleast 0.7
 ```
 
 ## Supported platforms
 
-| Platform | Default search paths                         |
-| -------- | -------------------------------------------- |
-| macOS    | `~/Library`, `/Library`                      |
-| Linux    | `~/.cache`, `~/.config`, `~/.local/share`    |
-| Windows  | `%APPDATA%`, `%LOCALAPPDATA%`                |
+| Platform | Default search paths                      |
+| -------- | ----------------------------------------- |
+| macOS    | `~/Library`, `/Library`                   |
+| Linux    | `~/.cache`, `~/.config`, `~/.local/share` |
+| Windows  | `%APPDATA%`, `%LOCALAPPDATA%`             |
 
 Use `--deep` to scan the entire home directory on any platform.
 
 ## Notes
 
-- Matching is case-insensitive by default
+- `clean` matching is case-insensitive by default
 - When a matching directory is found, its contents are not scanned individually
 - Deleting system-level files may require elevated privileges (sudo on macOS/Linux, Administrator on Windows)
+- `scan` is supported on macOS and Windows — Linux support is planned
 
 ## License
 

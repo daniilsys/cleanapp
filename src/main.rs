@@ -1,6 +1,6 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use console::style;
-use dialoguer::{Select, theme::ColorfulTheme};
+use dialoguer::{MultiSelect, Select, theme::ColorfulTheme};
 use indicatif::{ProgressBar, ProgressStyle};
 use search::SearchOptions;
 use std::path::PathBuf;
@@ -9,7 +9,7 @@ mod clean_files;
 use clean_files::clean_files;
 mod get_results;
 use get_results::get_results;
-use walkdir::WalkDir;
+mod scan;
 mod search;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -20,36 +20,61 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
     about = "Find and clean leftover application files and directories",
     before_help = "Run with elevated privileges (sudo on macOS/Linux, Administrator on Windows) to clean system-level files."
 )]
-struct Args {
-    #[arg(help = "Name of the app to clean or list files and directories for")]
-    app_name: String,
-    #[arg(long)]
-    #[arg(help = "list of file or directory names to exclude from cleaning")]
-    exclude: Vec<String>,
-    #[arg(long)]
-    #[arg(
-        help = "Make a deep search for files and directories related to the app. This may take more time but will find more items."
-    )]
-    deep: bool,
-    #[arg(long)]
-    #[arg(help = "Case sensitive search. By default, the search is case insensitive.")]
-    case_sensitive: bool,
-    #[arg(long)]
-    #[arg(help = "Exact match search. By default, the search is a substring match.")]
-    exact: bool,
-    #[arg(long)]
-    #[arg(help = "Search only in the current directory and its subdirectories")]
-    here: bool,
-    #[arg(long)]
-    #[arg(help = "Maximum depth of subdirectories to search")]
-    max_depth: Option<usize>,
-    #[arg(long)]
-    #[arg(help = "Add a custom path to search in (repeatable)")]
-    add: Vec<PathBuf>,
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Find and clean leftover files for a specific application
+    Clean {
+        #[arg(help = "Name of the app to clean or list files and directories for")]
+        app_name: String,
+        #[arg(long)]
+        #[arg(help = "list of file or directory names to exclude from cleaning")]
+        exclude: Vec<String>,
+        #[arg(long)]
+        #[arg(
+            help = "Make a deep search for files and directories related to the app. This may take more time but will find more items."
+        )]
+        deep: bool,
+        #[arg(long)]
+        #[arg(help = "Case sensitive search. By default, the search is case insensitive.")]
+        case_sensitive: bool,
+        #[arg(long)]
+        #[arg(help = "Exact match search. By default, the search is a substring match.")]
+        exact: bool,
+        #[arg(long)]
+        #[arg(help = "Search only in the current directory and its subdirectories")]
+        here: bool,
+        #[arg(long)]
+        #[arg(help = "Maximum depth of subdirectories to search")]
+        max_depth: Option<usize>,
+        #[arg(long)]
+        #[arg(help = "Add a custom path to search in (repeatable)")]
+        add: Vec<PathBuf>,
+    },
+    /// Scan for orphan application files (macOS & Windows, Linux planned)
+    Scan {
+        #[arg(
+            long,
+            default_value = "0.5",
+            value_parser = parse_confidence,
+            help = "Pre-select orphans with confidence >= this threshold (0.0 to 1.0)"
+        )]
+        confidence: f32,
+        #[arg(
+            long,
+            value_parser = parse_confidence,
+            help = "Only show orphans with confidence >= this value (0.0 to 1.0)"
+        )]
+        atleast: Option<f32>,
+    },
 }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
     if !is_elevated() {
         eprintln!("{}",
@@ -57,10 +82,48 @@ fn main() -> Result<()> {
         );
     }
 
+    match cli.command {
+        Commands::Clean {
+            app_name,
+            exclude,
+            deep,
+            case_sensitive,
+            exact,
+            here,
+            max_depth,
+            add,
+        } => run_clean(
+            app_name,
+            exclude,
+            deep,
+            case_sensitive,
+            exact,
+            here,
+            max_depth,
+            add,
+        ),
+        Commands::Scan {
+            confidence,
+            atleast,
+        } => scan::run_scan(confidence, atleast),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_clean(
+    app_name: String,
+    exclude: Vec<String>,
+    deep: bool,
+    case_sensitive: bool,
+    exact: bool,
+    here: bool,
+    max_depth: Option<usize>,
+    add: Vec<PathBuf>,
+) -> Result<()> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_message(format!(
         "Searching for files and directories related to '{}'",
-        args.app_name
+        app_name
     ));
     spinner.set_style(
         ProgressStyle::with_template("{spinner} {msg}")
@@ -70,104 +133,79 @@ fn main() -> Result<()> {
     spinner.enable_steady_tick(Duration::from_millis(100));
 
     let options = SearchOptions {
-        app_name: &args.app_name,
-        exclude_list: &args.exclude,
-        deep: args.deep,
-        case_sensitive: args.case_sensitive,
-        exact: args.exact,
-        max_depth: args.max_depth,
+        app_name: &app_name,
+        exclude_list: &exclude,
+        deep,
+        case_sensitive,
+        exact,
+        max_depth,
     };
 
-    let results = get_results(&options, &spinner, args.here, &args.add)?;
+    let results = get_results(&options, &spinner, here, &add)?;
     spinner.finish_and_clear();
 
     if results.is_empty() {
-        println!("No files or directories found for app: {}", args.app_name);
+        println!("No files or directories found for app: {}", app_name);
         return Ok(());
     }
     let theme = ColorfulTheme::default();
-    let size = total_size(&results);
-    let formated_size = format_size(size);
 
-    loop {
-        let select = Select::with_theme(&theme)
-            .with_prompt(format!(
-                "Found {} items for app '{}'. Total size: {}.\nWhat do you want to do?",
-                results.len(),
-                args.app_name,
-                formated_size
-            ))
-            .item("List all found files and directories")
-            .item("Clean all found files and directories")
-            .item("Exit")
-            .default(0);
+    let labels: Vec<String> = results
+        .iter()
+        .map(|p| {
+            let size = scan::entry_size(p);
+            format!("{} ({})", p.display(), format_size(size))
+        })
+        .collect();
 
-        if let Ok(choice) = select.interact() {
-            match choice {
-                0 => {
-                    println!("Found items:");
-                    for path in &results {
-                        if path.is_file() {
-                            println!("{} {}", style("[FILE]").green(), path.display()); // vert
-                        } else if path.is_dir() {
-                            println!("{} {}", style("[DIR]").blue(), path.display()); // bleu
-                        }
-                    }
-                }
-                1 => {
-                    let confirm = Select::with_theme(&theme)
-                        .with_prompt(
-                            "Are you sure you want to clean all found files and directories?",
-                        )
-                        .item("Yes, clean them")
-                        .item("No, go back")
-                        .default(0);
+    let defaults: Vec<bool> = vec![true; results.len()];
 
-                    if let Ok(confirm_choice) = confirm.interact() {
-                        if confirm_choice == 0 {
-                            clean_files(results);
-                            break;
-                        } else {
-                            println!("Cleaning cancelled. Returning to main menu.");
-                        }
-                    } else {
-                        eprintln!("Error reading user input. Returning to main menu.");
-                    }
-                }
-                2 => {
-                    println!("Exiting...");
-                    break;
-                }
-                _ => unreachable!(),
-            }
-        } else {
-            eprintln!("Error reading user input. Exiting...");
-            break;
-        }
+    let Some(selections) = MultiSelect::with_theme(&theme)
+        .with_prompt(
+            "Select items to delete (Space to toggle, Enter to confirm, 'a' to toggle all)",
+        )
+        .items(&labels)
+        .defaults(&defaults)
+        .interact_opt()?
+    else {
+        return Ok(());
+    };
+
+    if selections.is_empty() {
+        println!("Nothing selected. Exiting.");
+        return Ok(());
     }
+
+    let selected: Vec<PathBuf> = selections.iter().map(|&i| results[i].clone()).collect();
+    let selected_size = total_size(&selected);
+
+    let Some(confirm) = Select::with_theme(&theme)
+        .with_prompt(format!(
+            "About to delete {} items ({}). This cannot be undone. Confirm?",
+            selected.len(),
+            format_size(selected_size)
+        ))
+        .item("Yes, delete selected items")
+        .item("No, go back")
+        .default(1)
+        .interact_opt()?
+    else {
+        return Ok(());
+    };
+
+    if confirm == 0 {
+        clean_files(selected);
+        println!("Done.");
+    }
+
     Ok(())
 }
 
 fn total_size(paths: &[PathBuf]) -> u64 {
-    let mut total = 0;
-    for path in paths {
-        if path.is_file() {
-            if let Ok(metadata) = path.metadata() {
-                total += metadata.len();
-            }
-        } else {
-            total += WalkDir::new(path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-                .filter_map(|e| e.metadata().ok().map(|m| m.len()))
-                .sum::<u64>();
-        }
-    }
-    total
+    paths.iter().map(|p| scan::entry_size(p)).sum()
 }
 
-fn format_size(size: u64) -> String {
+pub fn format_size(size: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
@@ -209,6 +247,15 @@ mod tests {
     fn format_gigabytes() {
         assert_eq!(format_size(1024 * 1024 * 1024), "1.00 GB");
         assert_eq!(format_size(3 * 1024 * 1024 * 1024), "3.00 GB");
+    }
+}
+
+fn parse_confidence(s: &str) -> std::result::Result<f32, String> {
+    let val: f32 = s.parse().map_err(|e| format!("{e}"))?;
+    if (0.0..=1.0).contains(&val) {
+        Ok(val)
+    } else {
+        Err("confidence must be between 0.0 and 1.0".to_string())
     }
 }
 
