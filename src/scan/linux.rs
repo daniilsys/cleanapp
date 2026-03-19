@@ -103,13 +103,13 @@ fn discover_installed_apps(spinner: &ProgressBar) -> Vec<InstalledApp> {
         };
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "desktop") {
-                if let Some(app) = parse_desktop_file(&path) {
-                    let key = app.name.to_lowercase();
-                    if seen.insert(key) {
-                        spinner.set_message(format!("Found: {}", app.name));
-                        apps.push(app);
-                    }
+            if path.extension().is_some_and(|ext| ext == "desktop")
+                && let Some(app) = parse_desktop_file(&path)
+            {
+                let key = app.name.to_lowercase();
+                if seen.insert(key) {
+                    spinner.set_message(format!("Found: {}", app.name));
+                    apps.push(app);
                 }
             }
         }
@@ -204,19 +204,19 @@ fn parse_desktop_file(path: &Path) -> Option<InstalledApp> {
             if name.is_none() {
                 name = Some(val.to_string());
             }
-        } else if let Some(val) = trimmed.strip_prefix("Exec=") {
-            if exec.is_none() {
-                // Extract binary name: first token, strip path
-                let binary = val
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("")
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or("");
-                if !binary.is_empty() {
-                    exec = Some(binary.to_string());
-                }
+        } else if let Some(val) = trimmed.strip_prefix("Exec=")
+            && exec.is_none()
+        {
+            // Extract binary name: first token, strip path
+            let binary = val
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .rsplit('/')
+                .next()
+                .unwrap_or("");
+            if !binary.is_empty() {
+                exec = Some(binary.to_string());
             }
         }
     }
@@ -291,7 +291,10 @@ fn query_flatpak() -> Option<Vec<(String, String)>> {
         .filter_map(|line| {
             let mut parts = line.splitn(2, '\t');
             let app_id = parts.next()?.trim().to_string();
-            let name = parts.next().map(|s| s.trim().to_string()).unwrap_or_default();
+            let name = parts
+                .next()
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
             if app_id.is_empty() {
                 return None;
             }
