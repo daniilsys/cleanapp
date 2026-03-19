@@ -55,7 +55,7 @@ enum Commands {
         #[arg(help = "Add a custom path to search in (repeatable)")]
         add: Vec<PathBuf>,
     },
-    /// Scan for orphan application files (macOS & Windows, Linux planned)
+    /// Scan for orphan application files (macOS, Linux & Windows)
     Scan {
         #[arg(
             long,

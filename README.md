@@ -3,14 +3,14 @@
 [![CI](https://github.com/daniilsys/cleanapp/actions/workflows/ci.yml/badge.svg)](https://github.com/daniilsys/cleanapp/actions/workflows/ci.yml)
 [![Release](https://github.com/daniilsys/cleanapp/actions/workflows/release.yml/badge.svg)](https://github.com/daniilsys/cleanapp/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](Cargo.toml)
+[![Version](https://img.shields.io/badge/version-0.3.1-blue.svg)](Cargo.toml)
 
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)](https://www.linux.org/)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat&logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
-A cross-platform CLI tool to find and remove leftover files and directories from uninstalled applications. Supports targeted cleanup by app name and automatic orphan detection on macOS and Windows.
+A cross-platform CLI tool to find and remove leftover files and directories from uninstalled applications. Supports targeted cleanup by app name and automatic orphan detection on macOS, Linux and Windows.
 
 ## Install
 
@@ -73,7 +73,7 @@ cleanapp clean <APP_NAME> [OPTIONS]
 | `--max-depth <N>`  | Maximum depth of subdirectories to search                          |
 | `--add <PATH>`     | Add a custom path to search in (repeatable)                        |
 
-### `cleanapp scan` — Detect orphan files (macOS & Windows)
+### `cleanapp scan` — Detect orphan files (macOS, Linux & Windows)
 
 ```bash
 cleanapp scan [OPTIONS]
@@ -82,6 +82,7 @@ cleanapp scan [OPTIONS]
 Scans installed applications and checks support directories for entries that don't match any installed app. Each orphan candidate receives a confidence score (0-100%) based on match quality, file age, size, and name format.
 
 - **macOS**: discovers apps via `/Applications` bundle IDs, scans `~/Library` support directories
+- **Linux**: discovers apps via `.desktop` files, package managers (dpkg/rpm/pacman), Flatpak and Snap; scans `~/.config`, `~/.local/share`, `~/.cache`
 - **Windows**: discovers apps via the registry and Scoop, scans `%APPDATA%` and `%LOCALAPPDATA%`
 
 | Flag                   | Description                                                           |
@@ -125,7 +126,7 @@ cleanapp clean Zoom --add /tmp --add /var/log
 # Combine options
 cleanapp clean Chrome --here --add ~/Downloads --max-depth 2
 
-# Scan for orphan files (macOS/Windows)
+# Scan for orphan files (macOS/Linux/Windows)
 cleanapp scan
 
 # Only pre-select high-confidence orphans
@@ -150,7 +151,7 @@ Use `--deep` to scan the entire home directory on any platform.
 - `clean` matching is case-insensitive by default
 - When a matching directory is found, its contents are not scanned individually
 - Deleting system-level files may require elevated privileges (sudo on macOS/Linux, Administrator on Windows)
-- `scan` is supported on macOS and Windows — Linux support is planned
+- `scan` is supported on macOS, Linux and Windows
 
 ## License
 

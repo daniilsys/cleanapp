@@ -4,19 +4,25 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::run_scan;
 
+#[cfg(target_os = "linux")]
+mod linux;
+
+#[cfg(target_os = "linux")]
+pub use linux::run_scan;
+
 #[cfg(windows)]
 mod windows;
 
 #[cfg(windows)]
 pub use windows::run_scan;
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 pub fn run_scan(_min_confidence: f32, _min_threshold: Option<f32>) -> crate::Result<()> {
-    eprintln!("scan is not supported on Linux yet — coming soon");
+    eprintln!("scan is not supported on this platform yet");
     std::process::exit(1);
 }
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub struct OrphanCandidate {
     pub path: std::path::PathBuf,
     pub size: u64,
@@ -38,12 +44,12 @@ pub(crate) fn entry_size(path: &std::path::Path) -> u64 {
 
 // ── Shared constants and helpers used by platform modules ──
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub(crate) const NOISE_TOKENS: &[&str] = &["com", "org", "net", "app", "io", "the", "get"];
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub(crate) const NAME_SEPARATORS: &[char] = &['.', '-', '_', ' '];
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub(crate) fn tokenize_name(name: &str) -> Vec<String> {
     name.split(|c: char| NAME_SEPARATORS.contains(&c))
         .map(|t| t.to_lowercase())
@@ -51,7 +57,7 @@ pub(crate) fn tokenize_name(name: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub(crate) fn build_tokens(name: &str, extra: &str) -> Vec<String> {
     let mut tokens = tokenize_name(name);
     if !extra.is_empty() {
@@ -63,7 +69,7 @@ pub(crate) fn build_tokens(name: &str, extra: &str) -> Vec<String> {
 }
 
 /// Token overlap ratio: proportion of `folder_tokens` found in `app_tokens`.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub(crate) fn token_overlap(folder_tokens: &[String], app_tokens: &[String]) -> f32 {
     let common = folder_tokens
         .iter()
@@ -74,7 +80,7 @@ pub(crate) fn token_overlap(folder_tokens: &[String], app_tokens: &[String]) -> 
 
 /// Base confidence from 3 platform-agnostic signals.
 /// Returns a partial score; callers may add platform-specific signals before clamping.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub(crate) fn base_confidence(path: &std::path::Path, size: u64, best_match_score: f32) -> f32 {
     let mut score = 0.0f32;
 
@@ -116,7 +122,7 @@ pub(crate) fn base_confidence(path: &std::path::Path, size: u64, best_match_scor
 }
 
 /// Shared UX: filter, display MultiSelect, confirm, delete.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub(crate) fn present_orphans(
     orphans: Vec<OrphanCandidate>,
     min_confidence: f32,
